@@ -19,7 +19,10 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/types/span.h"  // from @com_google_absl
 #include "litert/cc/litert_environment.h"  // from @litert
+#include "litert/cc/litert_layout.h"  // from @litert
+#include "litert/cc/litert_ranked_tensor_type.h"  // from @litert
 #include "litert/cc/litert_tensor_buffer.h"  // from @litert
 #include "litert/test/matchers.h"  // from @litert
 #include "runtime/util/convert_tensor_buffer.h"
@@ -80,6 +83,26 @@ TEST(TensorBufferUtilTest, CopyTensorBuffer) {
   LITERT_ASSERT_OK_AND_ASSIGN(auto original_data,
                               CopyFromTensorBuffer<int8_t>(tensor_buffer));
   EXPECT_THAT(original_data, ElementsAre(10, 20, 30, 40, 50));
+}
+
+TEST(TensorBufferUtilTest,
+     WrapOrCreateTensorBufferFromHostMemory_SizeMismatch) {
+  auto tensor_type = MakeRankedTensorType<float>({1, 1536});
+  std::vector<float> host_data(2560, 0.0f);
+  absl::Span<float> host_span = absl::MakeSpan(host_data);
+
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      auto maybe_wrapped,
+      WrapOrCreateTensorBufferFromHostMemory(tensor_type, host_span));
+
+  // The behavior depends on whether the underlying runtime allows wrapping
+  // mismatched sizes. If it fails, it should return a non-wrapped managed
+  // buffer.
+  if (!maybe_wrapped.wrapped) {
+    LITERT_ASSERT_OK_AND_ASSIGN(auto packed_size,
+                                maybe_wrapped.buffer.PackedSize());
+    EXPECT_EQ(packed_size, 1536 * sizeof(float));
+  }
 }
 
 }  // namespace

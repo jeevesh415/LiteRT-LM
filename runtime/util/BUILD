@@ -289,7 +289,9 @@ cc_library(
     hdrs = ["tensor_buffer_util.h"],
     deps = [
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
         "@litert//litert/cc:litert_macros",
+        "@litert//litert/cc:litert_ranked_tensor_type",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
@@ -309,8 +311,13 @@ cc_test(
         ":convert_tensor_buffer",
         ":tensor_buffer_util",
         "@com_google_googletest//:gtest_main",
+        "@com_google_absl//absl/types:span",
+        "@litert//litert/cc:litert_element_type",
         "@litert//litert/cc:litert_environment",
+        "@litert//litert/cc:litert_layout",
+        "@litert//litert/cc:litert_ranked_tensor_type",
         "@litert//litert/cc:litert_tensor_buffer",
+        "@litert//litert/cc:litert_tensor_buffer_types",
         "@litert//litert/test:matchers",
     ],
 )
