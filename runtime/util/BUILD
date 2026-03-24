@@ -66,6 +66,17 @@ cc_test(
 )
 
 cc_library(
+    name = "data_stream",
+    hdrs = ["data_stream.h"],
+    deps = [
+        ":litert_status_util",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "executor_data_util",
     srcs = ["executor_data_util.cc"],
     hdrs = ["executor_data_util.h"],
