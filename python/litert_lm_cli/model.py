@@ -21,10 +21,13 @@ import inspect
 import json
 import os
 import pathlib
-import readline  # pylint: disable=unused-import
 import traceback
+from typing import cast
 
 import click
+import prompt_toolkit
+from prompt_toolkit import key_binding
+
 import litert_lm
 
 try:
@@ -39,7 +42,7 @@ except ImportError:
 
 def load_preset(preset: str):
   """Loads a preset file and returns the tools, messages and extra_context."""
-  click.echo(click.style(f"Loading preset from {preset}:", fg="cyan"))
+  click.echo(click.style(f"Loading preset from {preset}:", dim=True))
   if not os.path.exists(preset):
     click.echo(click.style(f"Preset file not found: {preset}", fg="red"))
     return None, None, None
@@ -64,22 +67,22 @@ def load_preset(preset: str):
   system_instruction = getattr(user_tools, "system_instruction", None)
   if system_instruction:
     click.echo(
-        click.style(f"- System instruction: {system_instruction}", fg="cyan")
+        click.style(f"- System instruction: {system_instruction}", dim=True)
     )
     messages = [{
         "role": "system",
         "content": [{"type": "text", "text": system_instruction}],
     }]
 
-  click.echo(click.style("- Tools:", fg="cyan"))
+  click.echo(click.style("- Tools:", dim=True))
   for tool in tools:
     click.echo(
-        click.style(f"  - {getattr(tool, '__name__', str(tool))}", fg="cyan")
+        click.style(f"  - {getattr(tool, '__name__', str(tool))}", dim=True)
     )
 
   extra_context = getattr(user_tools, "extra_context", None)
   if extra_context:
-    click.echo(click.style(f"- Extra context: {extra_context}", fg="cyan"))
+    click.echo(click.style(f"- Extra context: {extra_context}", dim=True))
 
   return tools, messages, extra_context
 
@@ -148,6 +151,7 @@ class Model:
       preset: str | None = None,
       prompt: str | None = None,
       enable_speculative_decoding: bool | None = None,
+      no_template: bool = False,
   ):
     """Runs the model interactively or with a single prompt.
 
@@ -159,6 +163,8 @@ class Model:
       prompt: A single prompt to run once and exit.
       enable_speculative_decoding: Whether to enable speculative decoding. If
         None, use the model's default.
+      no_template: Interact with the model directly without applying prompt
+        templates or stripping stop tokens.
     """
     if not self.exists():
       click.echo(
@@ -170,19 +176,11 @@ class Model:
       return
 
     if not prompt:
-      click.echo(click.style(f"Loading model {self.to_str()}...", fg="cyan"))
+      click.echo(
+          click.style(f"Loading model {self.to_str()}...", dim=True), nl=False
+      )
     try:
       backend_val = _parse_backend(backend)
-
-      tools = None
-      messages = None
-      extra_context = None
-      if preset:
-        tools, messages, extra_context = load_preset(preset)
-        if tools is None and messages is None and extra_context is None:
-          return
-
-      handler = LoggingToolEventHandler(self) if tools else None
 
       if is_android:
         if not _HAS_ADB:
@@ -195,54 +193,128 @@ class Model:
             enable_speculative_decoding=enable_speculative_decoding,
         )
 
-      with (
-          engine_cm as engine,
-          engine.create_conversation(
+      with engine_cm as engine:
+        if not prompt:
+          click.echo(click.style(" Done.", dim=True))
+
+        if no_template:
+          runner_cm = engine.create_session(apply_prompt_template=False)
+        else:
+          tools = None
+          messages = None
+          extra_context = None
+          if preset:
+            tools, messages, extra_context = load_preset(preset)
+            if tools is None and messages is None and extra_context is None:
+              return
+
+          handler = LoggingToolEventHandler(self) if tools else None
+
+          runner_cm = engine.create_conversation(
               tools=tools,
               messages=messages,
               tool_event_handler=handler,
               extra_context=extra_context,
-          ) as conversation,
-      ):
-        if prompt:
-          self._execute_prompt(conversation, prompt)
-          return
+          )
 
-        click.echo(
-            click.style(
-                "Model loaded. Type your prompts and press Enter. Type 'exit'"
-                " to quit.",
-                fg="cyan",
-            )
-        )
+        with runner_cm as runner:
+          if prompt:
+            if no_template:
+              self._execute_raw_prompt(
+                  cast(litert_lm.AbstractSession, runner), prompt
+              )
+            else:
+              self._execute_prompt(
+                  cast(litert_lm.AbstractConversation, runner), prompt
+              )
+            return
 
-        while True:
-          try:
-            user_prompt = input("> ")
-            if user_prompt.lower() == "exit":
+          click.echo(
+              click.style(
+                  "[enter] submit | [ctrl+j] newline | [ctrl+c] clear/exit",
+                  fg="cyan",
+              )
+          )
+          click.echo()
+
+          kb = key_binding.KeyBindings()
+
+          # Key binding for sending the prompt.
+          @kb.add("enter")
+          def _(event):
+            buffer = event.current_buffer
+            if buffer.text.strip():
+              buffer.validate_and_handle()
+
+          # Key binding for new line. Note that terminal cannot take
+          # "shift+enter", and "ctrl+enter"
+          @kb.add("c-j")  # standard terminal convention.
+          @kb.add("escape", "enter")  # alt+enter and esc+enter
+          def _(event):
+            event.current_buffer.insert_text("\n")
+
+          # Key binding for clearing input or exiting.
+          @kb.add("c-c")
+          def _(event):
+            buffer = event.current_buffer
+            if buffer.text:
+              buffer.text = ""
+            else:
+              event.app.exit(exception=EOFError)
+
+          history_path = os.path.join(
+              os.path.expanduser("~"), ".litert-lm", "history"
+          )
+          os.makedirs(os.path.dirname(history_path), exist_ok=True)
+
+          prompt_session = prompt_toolkit.PromptSession(
+              history=prompt_toolkit.history.FileHistory(history_path),
+              key_bindings=kb,
+          )
+
+          while True:
+            try:
+              user_prompt = prompt_session.prompt(
+                  prompt_toolkit.ANSI(click.style("> ", fg="green", bold=True)),
+                  multiline=True,
+                  # Start the new line in the beginning of line. This makes copy-and-paste
+                  prompt_continuation=lambda width, line_number, is_soft_wrap: (
+                      ""
+                  ),
+              )
+              if not user_prompt:
+                continue
+
+              if no_template:
+                self._execute_raw_prompt(
+                    cast(litert_lm.AbstractSession, runner),
+                    user_prompt,
+                )
+              else:
+                self._execute_prompt(
+                    cast(litert_lm.AbstractConversation, runner),
+                    user_prompt,
+                )
+
+            except EOFError:
               break
-            if not user_prompt:
+            except KeyboardInterrupt:
+              # Catch Ctrl+C at the input prompt
+              click.echo()
               continue
+            except Exception:  # pylint: disable=broad-exception-caught
+              click.echo(click.style("Error during inference", fg="red"))
+              traceback.print_exc()
 
-            self._execute_prompt(conversation, user_prompt)
-
-          except EOFError:
-            break
-          except KeyboardInterrupt:
-            # Catch Ctrl+C at the input prompt
-            click.echo()
-            continue
-          except Exception:  # pylint: disable=broad-exception-caught
-            click.echo(click.style("Error during inference", fg="red"))
-            traceback.print_exc()
-
-        click.echo("Model closed.")
+          click.echo(click.style("Model closed.", dim=True))
 
     except Exception:  # pylint: disable=broad-exception-caught
       click.echo(click.style("An error occurred", fg="red"))
       traceback.print_exc()
 
-  def _execute_prompt(self, conversation, prompt):
+  def _execute_prompt(
+      self, conversation: litert_lm.AbstractConversation, prompt: str
+  ):
     """Executes a single prompt and prints the result."""
     self.active_channel = None
     stream = conversation.send_message_async(prompt)
@@ -255,7 +327,7 @@ class Model:
             if self.active_channel is not None:
               click.echo()
               self.active_channel = None
-            click.echo(item.get("text", ""), nl=False)
+            click.echo(click.style(item.get("text", ""), fg="yellow"), nl=False)
 
         # Handle channels
         channels = chunk.get("channels", {})
@@ -265,7 +337,7 @@ class Model:
               click.echo()
             click.echo(click.style(f"[{channel_name}] ", fg="blue"), nl=False)
             self.active_channel = channel_name
-          click.echo(channel_content, nl=False)
+          click.echo(click.style(channel_content, fg="yellow"), nl=False)
       if self.active_channel is not None:
         click.echo()
       else:
@@ -276,7 +348,24 @@ class Model:
       # This ensures we don't throw away StopIteration.
       for _ in stream:
         pass
-      click.echo(click.style("\n[Generation cancelled]", fg="yellow"))
+      click.echo(click.style("\n[Generation cancelled]", dim=True))
+
+  def _execute_raw_prompt(
+      self, session: litert_lm.AbstractSession, prompt: str
+  ):
+    """Executes a single raw prompt and prints the result."""
+    session.run_prefill([prompt])
+    stream = session.run_decode_async()
+    try:
+      for chunk in stream:
+        if chunk.texts:
+          click.echo(click.style(chunk.texts[0], fg="yellow"), nl=False)
+      click.echo()
+    except KeyboardInterrupt:
+      # Empty the iterator queue.
+      for _ in stream:
+        pass
+      click.echo(click.style("\n[Generation cancelled]", dim=True))
 
   def benchmark(
       self,

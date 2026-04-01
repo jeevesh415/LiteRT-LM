@@ -41,6 +41,7 @@ pytype_strict_library(
     deps = [
         "//python/litert_lm",
         requirement("click"),
+        requirement("prompt_toolkit"),
     ],
     imports = [".."],
 )
@@ -173,6 +174,7 @@ py_wheel(
     }) + [
         "click",
         "huggingface_hub",
+        "prompt_toolkit",
     ],
     deps = [":package"],
 )

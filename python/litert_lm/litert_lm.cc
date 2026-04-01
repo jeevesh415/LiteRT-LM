@@ -648,10 +648,13 @@ NB_MODULE(litert_lm_ext, module) {
           nb::arg("extra_context") = nb::none())
       .def(
           "create_session",
-          [](Engine& self) {
-            return VALUE_OR_THROW(
-                self.CreateSession(SessionConfig::CreateDefault()));
+          [](Engine& self, bool apply_prompt_template) {
+            auto session_config = SessionConfig::CreateDefault();
+            session_config.SetApplyPromptTemplateInSession(
+                apply_prompt_template);
+            return VALUE_OR_THROW(self.CreateSession(session_config));
           },
+          nb::kw_only(), nb::arg("apply_prompt_template") = true,
           "Creates a new session for this engine.");
 
   nb::class_<Engine::Session>(module, "Session", nb::dynamic_attr(),
@@ -719,7 +722,9 @@ NB_MODULE(litert_lm_ext, module) {
                 self.RunTextScoring(target_text_views, store_token_lengths)));
           },
           nb::arg("target_text"), nb::arg("store_token_lengths") = false,
-          "Scores the target text after the prefill process is done.");
+          "Scores the target text after the prefill process is done.")
+      .def("cancel_process", &Engine::Session::CancelProcess,
+           "Cancels the ongoing inference process.");
 
   nb::class_<Conversation>(module, "Conversation", nb::dynamic_attr())
       // Support for Python context managers (with statement).

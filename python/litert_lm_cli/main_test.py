@@ -38,6 +38,14 @@ class MainTest(absltest.TestCase):
     self.assertEqual(result_h.exit_code, 0)
     self.assertEqual(result_help.output, result_h.output)
 
+  def test_run_no_template_flag(self):
+    runner = CliRunner()
+    # Test that --no-template is a valid option for the run command.
+    # We use --help to avoid actually running the model.
+    result = runner.invoke(main.cli, ["run", "--help"])
+    self.assertEqual(result.exit_code, 0)
+    self.assertIn("--no-template", result.output)
+
 
 if __name__ == "__main__":
   absltest.main()
