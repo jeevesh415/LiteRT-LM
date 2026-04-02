@@ -1,3 +1,17 @@
+### 🔥 What's New: Gemma 4 support with LiteRT-LM
+
+Deploy Gemma 4 across a broad range of hardware with stellar performance.
+
+👉 Try on Linux, macOS, Windows (WSL) or Raspberry Pi with the
+[LiteRT-LM CLI](https://ai.google.dev/edge/litert-lm/cli):
+
+```bash
+litert-lm run  \
+   --from-huggingface-repo=litert-community/gemma-4-E2B-it-litert-lm \
+   gemma-4-E2B-it.litertlm \
+   --prompt="What is the capital of France?"
+```
+
 # LiteRT-LM
 
 LiteRT-LM is Google's production-ready, high-performance, open-source inference
